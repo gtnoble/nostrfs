@@ -1,0 +1,17 @@
+{
+  "name": "nostrfs",
+  "version": "1.0.0",
+  "description": "synthetic file system for nostr",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Garret Noble",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^9.4.3",
+    "fuse-native": "^2.2.6",
+    "nostr": "^0.2.8",
+    "tap": "^18.7.0"
+  }
+}
