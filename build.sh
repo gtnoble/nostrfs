@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc nostrFs.c -Wall -Wpedantic -Werror -g -o nostrfs `pkg-config fuse --cflags --libs` -lsqlite3
+gcc nostrFs.c -fsanitize=address -fsanitize=leak -fsanitize=undefined -Wall -Wextra -Wpedantic -Werror -g -o nostrfs `pkg-config fuse --cflags --libs` -lsqlite3
