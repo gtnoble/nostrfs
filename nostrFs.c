@@ -3,7 +3,6 @@
 
 #define FUSE_USE_VERSION 26
 
-#include <fuse.h>
 #include <libgen.h>
 #include <stdbool.h>
 #include <string.h>
@@ -14,64 +13,12 @@
 
 #include <stdlib.h>
 #include <stdio.h>
-#include <sqlite3.h>
 #include <assert.h>
 
-enum file_type {
-    UNKNOWN_FILE_TYPE,
-    EVENT_DIR,
-    EVENT_FILE,
-    EVENTS_DIR,
-    ROOT_DIR,
-    TAGS_FILE,
-    CONTENT_FILE,
-    KIND_FILE,
-    PUBKEY_FILE,
-};
+#include "db.h"
+#include "path.h"
 
-#define ERROR_MISSING_EVENT -1
 
-const char *k_events_dir_name = "/e";
-
-const char *k_tags_filename = "tags";
-const char *k_content_filename = "content";
-const char *k_kind_filename = "kind";
-const char *k_pubkey_filename = "pubkey";
-
-const char k_tag_delimiter = ',';
-
-sqlite3 *db;
-
-char *all_event_ids_query_template = "SELECT id FROM nostrEvents;";
-sqlite3_stmt *all_event_ids_query;
-
-char *get_event_query_template = "SELECT * FROM nostrEvents WHERE id = ?;";
-sqlite3_stmt *get_event_query;
-
-char *get_event_created_at_template = "SELECT created_at FROM nostrEvents WHERE id = ?;";
-sqlite3_stmt *get_created_at_query;
-
-char *get_event_content_query_template = "SELECT content FROM nostrEvents WHERE id = ?;";
-sqlite3_stmt *get_content_query;
-
-char *get_event_kind_query_template = "SELECT kind FROM nostrEvents WHERE id = ?;";
-sqlite3_stmt *get_kind_query;
-
-char *get_event_pubkey_query_template = "SELECT pubkey FROM nostrEvents WHERE id = ?;";
-sqlite3_stmt *get_pubkey_query;
-
-char *get_tags_query_template = 
-    "SELECT tag_sequence, tag_value_index, tag_value " 
-    "FROM tags "
-    "WHERE id = ? "
-    "ORDER BY tag_sequence, tag_value_index";
-sqlite3_stmt *get_tags_query;
-
-void initialize_db(char *db_file_path);
-void parent_dir_name(const char *path, char *ret, int ret_length);
-enum file_type getFileType(const char *path);
-static bool is_directory(const char *path);
-static bool is_event_file(const char *path);
 static int nostrfs_getattr(const char *path, struct stat *st);
 static int nostrfs_readdir(
     const char *path, 
@@ -85,13 +32,6 @@ static int nostrfs_read(
     const char *path, char *buffer, size_t size, off_t offset, struct fuse_file_info *fi
 );
 static int nostrfs_release(const char *path, struct fuse_file_info *fi);
-static int open_event_file(
-    const char *id, sqlite3_stmt *event_query, struct fuse_file_info *fi
-);
-static int open_tags_file(
-    const char *id, struct fuse_file_info *fi
-);
-void prepare_query(char *template, sqlite3_stmt **query);
 
 static struct fuse_operations operations = {
     .getattr = nostrfs_getattr,
@@ -101,367 +41,203 @@ static struct fuse_operations operations = {
     .release = nostrfs_release
 };
 
+static int get_file_data(Path path, char **data) {
+    enum file_type filetype = get_file_type(path);
+    assert(is_data_file(filetype));
 
-void parent_dir_name(const char *path, char *ret, int ret_length) {
-    char path_copy[strlen(path) + 1];
-    strcpy(path_copy, path);
-    char *parent_dir = basename(dirname(path_copy));
-    strncpy(ret, parent_dir, ret_length);
-}
-
-void dirname_safe(const char *path, char *ret, int ret_length) {
-    char path_copy[strlen(path) + 1];
-    strcpy(path_copy, path);
-    char *dir = dirname(path_copy);
-    strncpy(ret, dir, ret_length);
-}
-
-void basename_safe(const char *path, char *ret, int ret_length) {
-    char path_copy[strlen(path) + 1];
-    strcpy(path_copy, path);
-    char *dir = basename(path_copy);
-    strncpy(ret, dir, ret_length);
-}
-
-enum file_type getFileType(const char *path) {
-
-    int path_length = strlen(path);
-    char directory_path[path_length];
-    dirname_safe(path, directory_path, path_length);
-
-    if (strcmp(path, k_events_dir_name) == 0)
-        return EVENTS_DIR;
-    else if (strcmp(path, "/") == 0)
-        return ROOT_DIR;
-    else if (strcmp(directory_path, k_events_dir_name) == 0) {
-        return EVENT_DIR;
-    }
-    else if (getFileType(directory_path) == EVENT_DIR)  {
-        char filename[path_length];
-        basename_safe(path, filename, path_length);
-        if (strcmp(filename, k_tags_filename) == 0) {
-            return TAGS_FILE;
-        }
-        else if (strcmp(filename, k_content_filename) == 0) {
-            return CONTENT_FILE;
-        }
-        else if (strcmp(filename, k_kind_filename) == 0) {
-            return KIND_FILE;
-        }
-        else if (strcmp(filename, k_pubkey_filename) == 0) {
-            return PUBKEY_FILE;
-        }
-        else
-            return UNKNOWN_FILE_TYPE;
-    }
-    else 
-        return UNKNOWN_FILE_TYPE;
-}
-
-static bool is_directory(const char *path) {
-    enum file_type filetype = getFileType(path);
-    return 
-        filetype == EVENT_DIR ||
-        filetype == ROOT_DIR ||
-        filetype == EVENTS_DIR;
-}
-
-static bool is_event_file(const char *path) {
-    enum file_type filetype = getFileType(path);
+    char *event_id = event_id_from_path(path);
+    int read_status;
+    assert(event_id != NULL);
     switch (filetype) {
-        case TAGS_FILE:
         case CONTENT_FILE:
+            read_status = get_event_content_data(event_id, data);
+            break;
         case KIND_FILE:
+            read_status = get_event_kind_data(event_id, data);
+            break;
         case PUBKEY_FILE:
-            return true;
+            read_status = get_event_pubkey_data(event_id, data);
+            break;
+        case TAG_VALUE_FILE: {
+            char *tag_index = tag_index_from_path(path);
+            assert(tag_index != NULL);
+            char *value_index = tag_value_index_from_path(path);
+            assert(value_index != NULL);
+            read_status = get_tag_value(event_id, atoi(tag_index), atoi(value_index), data);
+            break;
+        }
         default:
-            return false;
+            assert(false);
     }
+
+    return read_status;
 }
 
-static void db_bind_id_query(sqlite3_stmt *query, const char *event_id) {
-    assert(sqlite3_bind_text(query, 1, event_id, -1, NULL) == SQLITE_OK);
-}
+static int nostrfs_getattr(const char *raw_path, struct stat *st) {
 
-static long event_creation_time(const char *event_id) {
-    db_bind_id_query(get_created_at_query, event_id);
-    long time;
-    int step_status = sqlite3_step(get_created_at_query);
-    if (step_status == SQLITE_ROW) {
-        time = sqlite3_column_int64(get_created_at_query, 0);
-    }
-    else if (step_status == SQLITE_DONE) {
-        time = ERROR_MISSING_EVENT;
-    }
-    else {
-        fprintf(stderr, "Could not query event creation time: %s", sqlite3_errmsg(db));
-        exit(1);
-    }
-    sqlite3_reset(get_created_at_query);
-    return time;
-}
-
-static int nostrfs_getattr(const char *path, struct stat *st) {
-
+    Path *path = parse_path(raw_path);
+    assert(path != NULL);
 
     st->st_uid = getuid();
     st->st_gid = getgid();
     st->st_atime = time( NULL );
 
-    switch(getFileType(path)) {
-        case TAGS_FILE:
-        case CONTENT_FILE:
-        case KIND_FILE:
-        case PUBKEY_FILE: {
-            char event_id[strlen(path) + 1];
-            parent_dir_name(path, event_id, strlen(path) + 1);
-            time_t event_created_at = event_creation_time(event_id);
-            if (event_created_at == ERROR_MISSING_EVENT) {
-                errno = ENOENT;
-                return -1;
-            }
+    int return_code = 0;
+
+    enum file_type filetype = get_file_type(*path);
+
+    if (is_data_file(filetype)) {
+        char *event_id = event_id_from_path(*path);
+        assert(event_id != NULL);
+        char *event_data;
+        assert(get_file_data(*path, &event_data) == 0);
+
+        time_t event_created_at = event_creation_time(event_id);
+        if (event_created_at == -ENOENT) {
+            return_code = -ENOENT;
+        }
+        else {
             st->st_mtime = event_created_at;
             st->st_ctime = event_created_at;
             st->st_mode = S_IFREG | S_IRUSR;
             st->st_nlink = 1;
             st->st_size = 1;
-            //@todo need to add file size
+
+            assert(event_data != NULL);
+            st->st_size = strlen(event_data);
         }
-        break;
-        case EVENT_DIR: {
-            char path_copy[strlen(path) + 1];
-            strcpy(path_copy, path);
-            time_t event_created_at = event_creation_time(basename(path_copy));
-            st->st_mtime = event_created_at;
-            st->st_ctime = event_created_at;
+        free(event_data);
+    }
+    else {
+        switch(filetype) {
+            //@todo add tags file handling
+            case TAGS_DIR:
+            case TAG_KEY_DIR:
+            case TAG_DIR:
+            case EVENT_DIR: {
+                time_t event_created_at = event_creation_time(path_filename(*path));
+                st->st_mtime = event_created_at;
+                st->st_ctime = event_created_at;
+            }
+            // fall through
+            case ROOT_DIR:
+            case EVENTS_DIR:
+                st->st_nlink = 2;
+                st->st_mode = S_IFDIR | S_IRUSR;
+                break;
+            default:
+                return_code = -ENOENT;
         }
-        // fall through
-        case ROOT_DIR:
-        case EVENTS_DIR:
-            st->st_nlink = 2;
-            st->st_mode = S_IFDIR | S_IRUSR;
-            break;
-        default:
-            errno = ENOENT;
-            return -1;
     }
 
-    return 0;
+    free_path(path);
+    return return_code;
 }
 
-static int nostrfs_readdir(const char *path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
+static int nostrfs_readdir(const char *raw_path, void *buffer, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
 
-    (void)(path);
     (void)(fi);
     (void)(offset);
 
+    Path *path = parse_path(raw_path);
+    assert(path != NULL);
+
+    enum file_type filetype = get_file_type(*path);
+
     int read_dir_status;
-    switch (getFileType(path)) {
-        case ROOT_DIR:
-            filler(buffer, "e", NULL, 0);
-            read_dir_status = 0;
-            break;
-        case EVENT_DIR:
-            filler(buffer, k_content_filename, NULL, 0);
-            filler(buffer, k_kind_filename, NULL, 0);
-            filler(buffer, k_pubkey_filename, NULL, 0);
-            filler(buffer, k_tags_filename, NULL, 0);
-            read_dir_status = 0;
-            break;
-        case EVENTS_DIR: {
-            int stepstatus;
-            while ((stepstatus = sqlite3_step(all_event_ids_query)) == SQLITE_ROW) {
-                const char *event_id;
-                event_id = (const char *) sqlite3_column_text(all_event_ids_query, 0);
-                filler(buffer, event_id, NULL, 0);
+    if (is_directory(filetype)) {
+        char *id = event_id_from_path(*path);
+        char *tag_key = tag_key_from_path(*path);
+        char *tag_index = tag_index_from_path(*path);
+        switch (get_file_type(*path)) {
+            case ROOT_DIR:
+                read_dir_status = -fill_root_dir(buffer, filler);
+                break;
+            case EVENT_DIR:
+                read_dir_status = -fill_event_dir(buffer, filler);
+                break;
+            case EVENTS_DIR:
+                read_dir_status = -fill_events_dir(buffer, filler);
+                break;
+            case TAGS_DIR: {
+                char *id = parent_dirname(*path, 1);
+                read_dir_status = -fill_tags_dir(buffer, filler, id);
+                break;
+            }
+            case TAG_KEY_DIR:{
+                assert(id != NULL);
+                assert(tag_key != NULL);
+                read_dir_status = -fill_tag_key_dir(buffer, filler, id, tag_key);
+                break;
+            }
+            case TAG_DIR: {
+                assert(id != NULL);
+                assert(tag_index != NULL);
+                read_dir_status = 
+                    -fill_tag_values_dir(buffer, filler, id, atoi(tag_index));
+                break;
+            }
+            default:
+                assert(false);
             }
 
-            if (stepstatus != SQLITE_DONE) {
-                fprintf(
-                    stderr, 
-                    "Error reading events directory: error code %d: error message: %s", 
-                    sqlite3_extended_errcode(db), 
-                    sqlite3_errmsg(db)
-                );
-                errno = EINVAL;
-                read_dir_status = -1;
-            }
-            else {
-                read_dir_status = 0;
-            }
-
-            assert(sqlite3_reset(all_event_ids_query) == SQLITE_OK);
-            break;
-        }
-        case CONTENT_FILE:
-        case KIND_FILE:
-        case PUBKEY_FILE:
-        case TAGS_FILE:
-            errno = ENOTDIR;
-            read_dir_status = -1;
-            break;
-        default:
-            errno = ENOENT;
-            read_dir_status = -1;
+        filler(buffer, ".", NULL, 0);
+        filler(buffer, "..", NULL, 0);
+    }
+    else if (is_data_file(filetype)) {
+        read_dir_status = -ENOTDIR;
+    }
+    else {
+        read_dir_status = -ENOENT;
     }
 
-    filler(buffer, ".", NULL, 0);
-    filler(buffer, "..", NULL, 0);
+
+    free_path(path);
 
     return read_dir_status;
 }
 
-static int nostrfs_open(const char *path, struct fuse_file_info *fi) {
-    if (is_directory(path)) {
-        errno = EISDIR;
-        return -1;
-    }
+static int nostrfs_open(const char *raw_path, struct fuse_file_info *fi) {
+
+    Path *path = parse_path(raw_path);
+    assert(path != NULL);
+    enum file_type filetype = get_file_type(*path);
 
     int open_status;
-    if (is_event_file(path)) {
-        size_t path_size = strlen(path) + 1;
-        char *id = malloc(path_size);
+    if (is_directory(filetype)) {
+        open_status = -EISDIR;
+    }
+    else if (is_data_file(filetype)) {
+        char *id =  event_id_from_path(*path);
         assert(id != NULL);
-        parent_dir_name(path, id, path_size);
-
-        switch (getFileType(path)) {
-            case CONTENT_FILE:
-                open_status = open_event_file(id, get_content_query, fi);
-                fi->keep_cache = true;
-                break;
-            case KIND_FILE:
-                open_status = open_event_file(id, get_kind_query, fi);
-                fi->keep_cache = true;
-                break;
-            case PUBKEY_FILE:
-                open_status = open_event_file(id, get_pubkey_query, fi);
-                fi->keep_cache = true;
-                break;
-            case TAGS_FILE:
-                open_status = open_tags_file(id, fi);
-                fi->keep_cache = true;
-                break;
-            case ROOT_DIR:
-            case EVENT_DIR:
-            case EVENTS_DIR:
-                errno = EISDIR;
-                open_status = -1;
-                break;
-            default:
-                errno = ENOENT;
-                open_status = -1;
-        }
-        free(id);
-    }
-    return open_status;
-}
-
-static int open_event_file(
-    const char *id, sqlite3_stmt *event_query, struct fuse_file_info *fi
-) {
-    int open_status;
-
-    db_bind_id_query(event_query, id);
-    int stepstatus = sqlite3_step(event_query);
-    if (stepstatus == SQLITE_ROW) {
-        const char *file_data = (const char *) sqlite3_column_text(event_query, 0);
-        size_t data_length = strlen(file_data);
-        char *file_data_copy = calloc(data_length + 1, sizeof(char));
-        assert(file_data_copy != NULL);
-        strcpy(file_data_copy, file_data);
-        fi->fh = (long unsigned int) file_data_copy;
-        open_status = 0;
-
-    }
-    else if (stepstatus == SQLITE_DONE) {
-        errno = ENOENT;
-        open_status = -1;
-    }
-    else {
-        fprintf(stderr, "Error opening event file: %s", sqlite3_errmsg(db));
-        errno = EINVAL;
-        open_status = -1;
-    }
-    assert(sqlite3_reset(event_query) == SQLITE_OK);
-    return open_status;
-}
-
-static int open_tags_file(
-    const char *id, struct fuse_file_info *fi
-) {
-    db_bind_id_query(get_tags_query, id);
-
-    size_t data_length = 100;
-    char *tags_text = malloc(data_length);
-    assert(tags_text != NULL);
-
-    int stepstatus;
-    int current_row_index = 0;
-    size_t write_position = 0;
-    while (((stepstatus = sqlite3_step(get_tags_query)) == SQLITE_ROW)) {
-        int next_row_index = sqlite3_column_int(get_content_query, 2);
-        bool add_newline = next_row_index != current_row_index;
-        current_row_index = next_row_index;
-
-        const char *tag_value = (const char *) sqlite3_column_text(get_tags_query, 4);
-
-        size_t printed_string_length = 
-            strlen(tag_value) + sizeof(k_tag_delimiter) + add_newline * sizeof('\n');
-        size_t write_size = printed_string_length + sizeof('\0');
-
-        if (write_position + write_size >= data_length) {
-            data_length = (write_position + write_size) * 2;
-            tags_text = realloc(tags_text, data_length);
-            assert(tags_text != NULL);
-        }
-
-        size_t num_chars_written;
-        if (add_newline) {
-            num_chars_written = sprintf(
-                tags_text + write_position, "\n%c%s", k_tag_delimiter, tag_value
-            );
-        }
-        else {
-            num_chars_written = sprintf(
-                tags_text + write_position, "%c%s", k_tag_delimiter, tag_value
-            );
-        }
-        assert(num_chars_written == printed_string_length);
-        write_position += write_size;
-        assert(tags_text[write_position] == '\0');
-    }
-
-    int open_status;
-    if (stepstatus != SQLITE_DONE) {
-        fprintf(stderr, "Failed to read tags: %s", sqlite3_errmsg(db));
-        open_status = -1;
-    }
-    if (write_position == 0) {
-        errno = ENOENT;
-        open_status = -1;
-    }
-    else {
-        fi->fh = (long unsigned int) tags_text;
+        fi->keep_cache = true;
+        assert(get_file_data(*path, (char **) &fi->fh) == 0);
         open_status = 0;
     }
-
-    assert(sqlite3_reset(get_content_query) == SQLITE_OK);
+    else {
+        open_status = -ENOENT;
+    }
+    free_path(path);
     return open_status;
-
 }
 
 static int nostrfs_read(
-    const char *path, 
+    const char *raw_path, 
     char *buffer, 
     size_t size, 
     off_t offset, 
     struct fuse_file_info *fi
 ) {
-    if (is_directory(path)) {
-        errno = EISDIR;
-        return -1;
+
+    Path *path = parse_path(raw_path);
+    assert(path != NULL);
+    enum file_type filetype = get_file_type(*path);
+
+    int read_length;
+    if (is_directory(filetype)) {
+        read_length = -EISDIR;
     }
-    else if (is_event_file(path)) {
+    else if (is_data_file(filetype)) {
         size_t file_length = strlen((char *) fi->fh);
         if (offset < (off_t) file_length) {
             if (offset + size > file_length) {
@@ -472,12 +248,13 @@ static int nostrfs_read(
         else {
             size = 0;
         }
-        return size;
+        read_length = size;
     }
     else {
-        errno = ENOENT;
-        return -1;
+        read_length = -ENOENT;
     }
+    free_path(path);
+    return read_length;
 }
 
 static int nostrfs_release(const char *path, struct fuse_file_info *fi) {
@@ -487,62 +264,6 @@ static int nostrfs_release(const char *path, struct fuse_file_info *fi) {
     return 0;
 }
 
-void prepare_query(char *template, sqlite3_stmt **query) {
-    int template_size = strlen(template) + 1;
-    assert(
-        sqlite3_prepare_v2(
-            db, 
-            template, 
-            template_size, 
-            query, 
-            NULL
-        ) == SQLITE_OK
-    );
-}
-
-void initialize_db(char *db_file_path) {
-    if (sqlite3_open(db_file_path, &db) != SQLITE_OK) {
-        fprintf(stderr, "Failed to open database file \"%s\": %s\n", db_file_path, sqlite3_errmsg(db));
-        exit(EXIT_FAILURE);
-    }
-
-    sqlite3_extended_result_codes(db, 1);
-
-    prepare_query(
-        all_event_ids_query_template, 
-        &all_event_ids_query
-    );
-
-    prepare_query(
-        get_event_content_query_template, 
-        &get_content_query
-    );
-
-    prepare_query(
-        get_event_query_template,
-        &get_event_query
-    );
-    prepare_query(
-        get_event_kind_query_template,
-        &get_kind_query
-    );
-
-    prepare_query(
-        get_event_pubkey_query_template,
-        &get_pubkey_query
-    );
-
-    prepare_query(
-        get_tags_query_template,
-        &get_tags_query
-    );
-
-    prepare_query(
-        get_event_created_at_template,
-        &get_created_at_query
-    );
-
-}
 
 int main(int argc, char *argv[]) {
     initialize_db("./test.sqlite3");

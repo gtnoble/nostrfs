@@ -21,9 +21,10 @@ const CREATE_NOSTR_TAGS_TABLE_TEMPLATE =
 CREATE TABLE IF NOT EXISTS
     tags (
       id TEXT,
-      tag_sequence INTEGER,
-      tag_value_index INTEGER,
-      tag_value TEXT,
+      key TEXT,
+      tag_index INTEGER,
+      value_index INTEGER,
+      value TEXT,
       FOREIGN KEY(id) REFERENCES nostrEvents(id)
     )
 ;
@@ -50,12 +51,13 @@ const INSERT_NOSTR_TAG_TEMPLATE =
 INSERT OR IGNORE INTO
     tags (
       id,
-      tag_sequence,
-      tag_value_index,
-      tag_value
+      key,
+      tag_index,
+      value_index,
+      value
     )
 VALUES
-    (?, ?, ?, ?)
+    (?, ?, ?, ?, ?)
 ;
 `
 
@@ -116,10 +118,13 @@ class NostrDb {
         nostrEvent.sig
       )
       for (let tagSequence = 0; tagSequence < nostrEvent.tags.length; tagSequence++) {
-        for (let tagValueIndex = 0; tagValueIndex < nostrEvent.tags[tagSequence]; tagValueIndex++) {
+        const tag = nostrEvent.tags[tagSequence]
+        const tagKey = tag[0]
+        const tagValues = tag.slice(1)
+        for (let tagValueIndex = 0; tagValueIndex < tagValues.length; tagValueIndex++) {
           this
             .insertTagQuery
-            .run(nostrEvent.id, tagSequence, tagValueIndex, nostrEvent.tags[tagSequence][tagValueIndex])
+            .run(nostrEvent.id, tagKey, tagSequence, tagValueIndex, tagValues[tagValueIndex])
         }
       }
       return true;
