@@ -29,6 +29,11 @@ static Query get_tag_indices_with_key_query = NEW_QUERY("SELECT DISTINCT tag_ind
 static Query get_tag_value_indices_query = NEW_QUERY("SELECT value_index FROM tags WHERE id = ? AND tag_index = ?;");
 static Query get_tag_value_query = NEW_QUERY("SELECT value FROM tags WHERE id = ? AND tag_index = ? AND value_index = ?;");
 
+static Query get_pubkeys_query = NEW_QUERY("SELECT DISTINCT pubkey FROM nostrEvents;");
+static Query get_pubkey_event_ids_query = NEW_QUERY("SELECT id FROM nostrEvents WHERE pubkey = ?;");
+static Query get_pubkey_event_kinds_query = NEW_QUERY("SELECT DISTINCT kind FROM nostrEvents WHERE pubkey = ?;");
+static Query get_pubkey_kind_events_query = NEW_QUERY("SELECT id FROM nostrEvents WHERE pubkey = ? AND kind = ?;");
+
 static Query *all_queries[] = {
     &get_event_ids_query,
     &get_event_query,
@@ -40,6 +45,10 @@ static Query *all_queries[] = {
     &get_tag_indices_with_key_query,
     &get_tag_value_indices_query,
     &get_tag_value_query,
+    &get_pubkeys_query,
+    &get_pubkey_event_ids_query,
+    &get_pubkey_event_kinds_query,
+    &get_pubkey_kind_events_query,
     NULL
 };
 
@@ -133,6 +142,11 @@ int fill_tag_values_dir(void *buffer, fuse_fill_dir_t filler, const char *id, in
     sqlite3_stmt *statement = get_tag_value_indices_query.statement;
     sqlite3_bind_text(statement, 1, id, -1, NULL);
     sqlite3_bind_int(statement, 2, tag_index);
+    return fill_dir(buffer, filler, statement);
+}
+
+int fill_pubkeys_dir(void *buffer, fuse_fill_dir_t filler) {
+    sqlite3_stmt *statement = get_pubkeys_query.statement;
     return fill_dir(buffer, filler, statement);
 }
 

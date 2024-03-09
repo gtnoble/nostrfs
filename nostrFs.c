@@ -18,6 +18,21 @@
 #include "db.h"
 #include "path.h"
 
+typedef int (* DirFiller)(Path path, void *buffer, fuse_fill_dir_t filler);
+typedef bool (* FileDetector)(Path path);
+typedef int (* FileDataFetcher)(Path path, char **out_data);
+
+typedef struct {
+    const char *name;
+    FileDetector detect;
+    DirFiller fill;
+} Directory;
+
+typedef struct {
+    const char *name;
+    FileDetector detect;
+    FileDataFetcher fetch_data;
+} DataFile;
 
 static int nostrfs_getattr(const char *path, struct stat *st);
 static int nostrfs_readdir(
@@ -158,6 +173,9 @@ static int nostrfs_readdir(const char *raw_path, void *buffer, fuse_fill_dir_t f
                 break;
             case EVENTS_DIR:
                 read_dir_status = -fill_events_dir(buffer, filler);
+                break;
+            case PUBKEYS_DIR:
+                read_dir_status = -fill_pubkeys_dir(buffer, filler);
                 break;
             case TAGS_DIR: {
                 char *id = parent_dirname(*path, 1);

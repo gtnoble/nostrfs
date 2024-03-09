@@ -5,6 +5,7 @@
 
 
 int fill_events_dir(void *buffer, fuse_fill_dir_t filler);
+int fill_pubkeys_dir(void *buffer, fuse_fill_dir_t filler);
 int get_event_content_data(const char *id, char **ret_file_data);
 int get_event_kind_data(const char *id, char **ret_file_data);
 int get_event_pubkey_data(const char *id, char **ret_file_data);

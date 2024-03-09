@@ -10,6 +10,7 @@
 static const size_t k_initial_num_path_components = 20;
 
 static const char *k_events_dir_name = "e";
+static const char *k_pubkeys_dir_name = "p";
 
 static const char *k_tags_filename = "tags";
 static const char *k_content_filename = "content";
@@ -124,6 +125,14 @@ static bool is_event_dir(Path path) {
     return path_exists(path) && is_events_dir(dirpath(path));
 }
 
+static bool is_pubkeys_dir(Path path) {
+    assert(is_valid_path(path));
+    return 
+        path_exists(path) && 
+        is_root_dir(dirpath(path)) && 
+        strcmp(path_filename(path), k_pubkeys_dir_name) == 0;
+}
+
 static bool is_in_event_dir(Path path) {
     assert(is_valid_path(path));
     return path_exists(path) && is_event_dir(dirpath(path));
@@ -159,6 +168,9 @@ enum file_type get_file_type(Path path) {
         return ROOT_DIR;
     else if (is_events_dir(path))
         return EVENTS_DIR;
+    else if (is_pubkeys_dir(path)) {
+        return PUBKEYS_DIR;
+    }
     else if (is_event_dir(path)) {
         return EVENT_DIR;
     }
@@ -197,6 +209,7 @@ bool is_directory(enum file_type filetype) {
         filetype == EVENT_DIR ||
         filetype == ROOT_DIR ||
         filetype == EVENTS_DIR ||
+        filetype == PUBKEYS_DIR ||
         filetype == TAGS_DIR ||
         filetype == TAG_DIR ||
         filetype == TAG_KEY_DIR;

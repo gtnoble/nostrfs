@@ -8,6 +8,7 @@ enum file_type {
     EVENT_DIR,
     EVENT_FILE,
     EVENTS_DIR,
+    PUBKEYS_DIR,
     ROOT_DIR,
     TAGS_DIR,
     TAG_KEY_DIR,
@@ -15,7 +16,28 @@ enum file_type {
     TAG_VALUE_FILE,
     CONTENT_FILE,
     KIND_FILE,
-    PUBKEY_FILE
+    PUBKEY_FILE,
+    NULL_FILE_TYPE
+};
+
+static const enum file_type k_data_files[] = {
+    EVENT_FILE,
+    CONTENT_FILE,
+    KIND_FILE,
+    PUBKEY_FILE,
+    TAG_VALUE_FILE,
+    NULL_FILE_TYPE
+};
+
+static const enum file_type k_directory_files[] = {
+    EVENT_DIR,
+    EVENTS_DIR,
+    PUBKEYS_DIR,
+    ROOT_DIR,
+    TAG_DIR,
+    TAG_KEY_DIR,
+    TAGS_DIR,
+    NULL_FILE_TYPE
 };
 
 typedef struct {
