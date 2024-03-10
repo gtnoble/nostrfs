@@ -7,6 +7,7 @@
 
 #include "path.h"
 
+
 static const size_t k_initial_num_path_components = 20;
 
 static const char *k_events_dir_name = "e";
@@ -107,12 +108,12 @@ char *path_filename(Path path) {
 }
 
 
-static bool is_root_dir(Path path) {
+bool is_root_dir(Path path) {
     assert(is_valid_path(path));
     return path_exists(path) && path.num_components == 0;
 }
 
-static bool is_events_dir(Path path) {
+bool is_events_dir(Path path) {
     assert(is_valid_path(path));
     return 
         path_exists(path) && 
@@ -120,12 +121,12 @@ static bool is_events_dir(Path path) {
         strcmp(path_filename(path), k_events_dir_name) == 0;
 }
 
-static bool is_event_dir(Path path) {
+bool is_event_dir(Path path) {
     assert(is_valid_path(path));
     return path_exists(path) && is_events_dir(dirpath(path));
 }
 
-static bool is_pubkeys_dir(Path path) {
+bool is_pubkeys_dir(Path path) {
     assert(is_valid_path(path));
     return 
         path_exists(path) && 
@@ -138,7 +139,28 @@ static bool is_in_event_dir(Path path) {
     return path_exists(path) && is_event_dir(dirpath(path));
 }
 
-static bool is_tags_dir(Path path) {
+bool is_content_file(Path path) {
+    assert(is_valid_path(path));
+    return 
+        is_in_event_dir(path) && 
+        strcmp(path_filename(path), k_content_filename) == 0;
+}
+
+bool is_kind_file(Path path) {
+    assert(is_valid_path(path));
+    return 
+        is_in_event_dir(path) && 
+        strcmp(path_filename(path), k_kind_filename) == 0;
+}
+
+bool is_pubkey_file(Path path) {
+    assert(is_valid_path(path));
+    return 
+        is_in_event_dir(path) && 
+        strcmp(path_filename(path), k_pubkey_filename) == 0;
+}
+
+bool is_tags_dir(Path path) {
     assert(is_valid_path(path));
     return 
         path_exists(path) && 
@@ -146,88 +168,19 @@ static bool is_tags_dir(Path path) {
         strcmp(path_filename(path), k_tags_filename) == 0;
 }
 
-static bool is_tag_key_dir(Path path) {
+bool is_tag_key_dir(Path path) {
     assert(is_valid_path(path));
     return path_exists(path) && is_tags_dir(dirpath(path));
 }
 
-static bool is_tag_dir(Path path) {
+bool is_tag_dir(Path path) {
     assert(is_valid_path(path));
     return path_exists(path) && is_tag_key_dir(dirpath(path));
 }
 
-static bool is_tag_value_file(Path path) {
+bool is_tag_value_file(Path path) {
     assert(is_valid_path(path));
     return path_exists(path) && is_tag_dir(dirpath(path));
-}
-
-enum file_type get_file_type(Path path) {
-    assert(is_valid_path(path));
-
-    if (is_root_dir(path))
-        return ROOT_DIR;
-    else if (is_events_dir(path))
-        return EVENTS_DIR;
-    else if (is_pubkeys_dir(path)) {
-        return PUBKEYS_DIR;
-    }
-    else if (is_event_dir(path)) {
-        return EVENT_DIR;
-    }
-    else if (is_tags_dir(path)) {
-        return TAGS_DIR;
-    }
-    else if (is_tag_key_dir(path)) {
-        return TAG_KEY_DIR;
-    }
-    else if (is_tag_dir(path)) {
-        return TAG_DIR;
-    }
-    else if (is_tag_value_file(path)) {
-        return TAG_VALUE_FILE;
-    }
-    else if (is_in_event_dir(path))  {
-        char *filename = path_filename(path);
-        if (strcmp(filename, k_content_filename) == 0) {
-            return CONTENT_FILE;
-        }
-        else if (strcmp(filename, k_kind_filename) == 0) {
-            return KIND_FILE;
-        }
-        else if (strcmp(filename, k_pubkey_filename) == 0) {
-            return PUBKEY_FILE;
-        }
-        else
-            return UNKNOWN_FILE_TYPE;
-    }
-    else 
-        return UNKNOWN_FILE_TYPE;
-}
-
-bool is_directory(enum file_type filetype) {
-    return 
-        filetype == EVENT_DIR ||
-        filetype == ROOT_DIR ||
-        filetype == EVENTS_DIR ||
-        filetype == PUBKEYS_DIR ||
-        filetype == TAGS_DIR ||
-        filetype == TAG_DIR ||
-        filetype == TAG_KEY_DIR;
-}
-
-bool is_event_file(enum file_type filetype) {
-    switch (filetype) {
-        case CONTENT_FILE:
-        case KIND_FILE:
-        case PUBKEY_FILE:
-            return true;
-        default:
-            return false;
-    }
-}
-
-bool is_data_file(enum file_type filetype) {
-    return is_event_file(filetype) || filetype == TAG_VALUE_FILE;
 }
 
 static char *locate_value_in_path(Path path, bool (*path_check)(Path)) {
@@ -258,11 +211,8 @@ char *tag_value_index_from_path(Path path) {
     return locate_value_in_path(path, is_tag_value_file);
 }
 
-bool is_normal_file(enum file_type filetype) {
-    return is_event_file(filetype) || filetype == TAG_VALUE_FILE;
-}
-
-int fill_event_dir(void *buffer, fuse_fill_dir_t filler) {
+int fill_event_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
+    (void) path;
 
     filler(buffer, k_content_filename, NULL, 0);
     filler(buffer, k_kind_filename, NULL, 0);
@@ -271,7 +221,10 @@ int fill_event_dir(void *buffer, fuse_fill_dir_t filler) {
     return 0;
 }
 
-int fill_root_dir(void *buffer, fuse_fill_dir_t filler) {
+int fill_root_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
+    (void) path;
+
     filler(buffer, k_events_dir_name, NULL, 0);
+    filler(buffer, k_pubkeys_dir_name, NULL, 0);
     return 0;
 }

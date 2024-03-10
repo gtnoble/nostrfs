@@ -8,6 +8,7 @@
 #include <sqlite3.h>
 
 #include "db.h"
+#include "path.h"
 
 typedef struct {
     const char *template;
@@ -121,58 +122,90 @@ static int fill_dir(void *buffer, fuse_fill_dir_t filler, sqlite3_stmt *statemen
     return fill_dir_status;
 }
 
-int fill_events_dir(void *buffer, fuse_fill_dir_t filler) {
+int fill_events_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
+    (void) path;
+
     return fill_dir(buffer, filler, get_event_ids_query.statement);
 }
 
-int fill_tags_dir(void *buffer, fuse_fill_dir_t filler, const char *id) {
+int fill_tags_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     sqlite3_stmt *statement = get_unique_tag_keys_query.statement;
-    sqlite3_bind_text(statement, 1, id, -1, NULL);
+
+    char *event_id = event_id_from_path(path);
+    assert(event_id != NULL);
+    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
+
     return fill_dir(buffer, filler, statement);
 }
 
-int fill_tag_key_dir(void *buffer, fuse_fill_dir_t filler, const char *id, const char *key) {
+int fill_tag_key_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     sqlite3_stmt *statement = get_tag_indices_with_key_query.statement;
-    sqlite3_bind_text(statement, 1, id, -1, NULL);
+
+    char *event_id = event_id_from_path(path);
+    assert(event_id != NULL);
+    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
+
+    char *key = tag_key_from_path(path);
+    assert(key != NULL);
     sqlite3_bind_text(statement, 2, key, -1, NULL);
+
     return fill_dir(buffer, filler, statement);
 }
 
-int fill_tag_values_dir(void *buffer, fuse_fill_dir_t filler, const char *id, int tag_index) {
+int fill_tag_values_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     sqlite3_stmt *statement = get_tag_value_indices_query.statement;
-    sqlite3_bind_text(statement, 1, id, -1, NULL);
-    sqlite3_bind_int(statement, 2, tag_index);
+
+    char *event_id = event_id_from_path(path);
+    assert(event_id != NULL);
+    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
+
+    char *raw_tag_index = tag_index_from_path(path);
+    assert(raw_tag_index != NULL);
+    sqlite3_bind_int(statement, 2, atoi(raw_tag_index));
+
     return fill_dir(buffer, filler, statement);
 }
 
-int fill_pubkeys_dir(void *buffer, fuse_fill_dir_t filler) {
+int fill_pubkeys_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
+    (void) path;
+
     sqlite3_stmt *statement = get_pubkeys_query.statement;
     return fill_dir(buffer, filler, statement);
 }
 
-int get_tag_value(const char *id, int tag_index, int value_index, char **ret_file_data) {
+int get_tag_value(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_tag_value_query.statement;
-    sqlite3_bind_text(statement, 1, id, -1, NULL);
-    sqlite3_bind_int(statement, 2, tag_index);
-    sqlite3_bind_int(statement, 3, value_index);
+
+    char *event_id = event_id_from_path(path);
+    assert(event_id != NULL);
+    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
+
+    char *tag_index = tag_index_from_path(path);
+    assert(tag_index != NULL);
+    sqlite3_bind_int(statement, 2, atoi(tag_index));
+
+    char *value_index = tag_value_index_from_path(path);
+    assert(value_index != NULL);
+    sqlite3_bind_int(statement, 3, atoi(value_index));
+
     return get_file_data(statement, ret_file_data);
 }
 
-int get_event_content_data(const char *id, char **ret_file_data) {
+int get_event_content_data(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_content_query.statement;
-    db_bind_id_query(statement, id);
+    db_bind_id_query(statement, event_id_from_path(path));
     return get_file_data(statement, ret_file_data);
 }
 
-int get_event_kind_data(const char *id, char **ret_file_data) {
+int get_event_kind_data(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_event_kind_query.statement;
-    db_bind_id_query(statement, id);
+    db_bind_id_query(statement, event_id_from_path(path));
     return get_file_data(statement, ret_file_data);
 }
 
-int get_event_pubkey_data(const char *id, char **ret_file_data) {
+int get_event_pubkey_data(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_event_pubkey_query.statement;
-    db_bind_id_query(statement, id);
+    db_bind_id_query(statement, event_id_from_path(path));
     return get_file_data(statement, ret_file_data);
 }
 
