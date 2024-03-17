@@ -9,6 +9,7 @@
 
 #include "db.h"
 #include "path.h"
+#include "synthetic_file.h"
 
 typedef struct {
     const char *template;
@@ -55,12 +56,26 @@ static Query *all_queries[] = {
 
 static int get_file_data(sqlite3_stmt *statement, char **ret_file_data);
 
-static void db_bind_id_query(sqlite3_stmt *query, const char *event_id) {
-    assert(sqlite3_bind_text(query, 1, event_id, -1, NULL) == SQLITE_OK);
+static void statement_bind_text(sqlite3_stmt *statement, int index, const char *text) {
+    assert(statement != NULL);
+    assert(text != NULL);
+    const bool binding_successful = sqlite3_bind_text(statement, index, text, -1, NULL) == SQLITE_OK;
+    assert(binding_successful);
+}
+
+static void statement_bind_number(sqlite3_stmt *statement, int index, char *number) {
+    assert(statement != NULL);
+    assert(number != NULL);
+    const bool binding_successful = sqlite3_bind_int(statement, index, atoi(number)) == SQLITE_OK;
+    assert(binding_successful);
+}
+
+static void statement_bind_id(sqlite3_stmt *query, Path path) {
+    statement_bind_text(query, 1, event_id_from_path(path));
 }
 
 long event_creation_time(const char *event_id) {
-    db_bind_id_query(get_created_at_query.statement, event_id);
+    statement_bind_text(get_created_at_query.statement, 1, event_id);
     long time;
     int step_status = sqlite3_step(get_created_at_query.statement);
     if (step_status == SQLITE_ROW) {
@@ -117,7 +132,8 @@ static int fill_dir(void *buffer, fuse_fill_dir_t filler, sqlite3_stmt *statemen
         fill_dir_status = 0;
     }
 
-    assert(sqlite3_reset(statement) == SQLITE_OK);
+    const bool reset_successful = sqlite3_reset(statement) == SQLITE_OK;
+    assert(reset_successful);
 
     return fill_dir_status;
 }
@@ -130,38 +146,23 @@ int fill_events_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
 
 int fill_tags_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     sqlite3_stmt *statement = get_unique_tag_keys_query.statement;
-
-    char *event_id = event_id_from_path(path);
-    assert(event_id != NULL);
-    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
+    statement_bind_text(statement, 1, event_id_from_path(path));
 
     return fill_dir(buffer, filler, statement);
 }
 
 int fill_tag_key_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     sqlite3_stmt *statement = get_tag_indices_with_key_query.statement;
-
-    char *event_id = event_id_from_path(path);
-    assert(event_id != NULL);
-    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
-
-    char *key = tag_key_from_path(path);
-    assert(key != NULL);
-    sqlite3_bind_text(statement, 2, key, -1, NULL);
+    statement_bind_text(statement, 1, event_id_from_path(path));
+    statement_bind_text(statement, 2, tag_key_from_path(path));
 
     return fill_dir(buffer, filler, statement);
 }
 
 int fill_tag_values_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     sqlite3_stmt *statement = get_tag_value_indices_query.statement;
-
-    char *event_id = event_id_from_path(path);
-    assert(event_id != NULL);
-    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
-
-    char *raw_tag_index = tag_index_from_path(path);
-    assert(raw_tag_index != NULL);
-    sqlite3_bind_int(statement, 2, atoi(raw_tag_index));
+    statement_bind_text(statement, 1, event_id_from_path(path));
+    statement_bind_number(statement, 2, tag_index_from_path(path));
 
     return fill_dir(buffer, filler, statement);
 }
@@ -173,39 +174,45 @@ int fill_pubkeys_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
     return fill_dir(buffer, filler, statement);
 }
 
+int fill_pubkey_events_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
+    sqlite3_stmt *statement = get_pubkey_event_ids_query.statement;
+    statement_bind_text(statement, 1, pubkey_from_path(path));
+
+    return fill_dir(buffer, filler, statement);
+}
+
+int fill_pubkey_kinds_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
+    sqlite3_stmt *statement = get_pubkey_event_kinds_query.statement;
+    statement_bind_text(statement, 1, pubkey_from_path(path));
+
+    return fill_dir(buffer, filler, statement);
+}
+
 int get_tag_value(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_tag_value_query.statement;
 
-    char *event_id = event_id_from_path(path);
-    assert(event_id != NULL);
-    sqlite3_bind_text(statement, 1, event_id, -1, NULL);
-
-    char *tag_index = tag_index_from_path(path);
-    assert(tag_index != NULL);
-    sqlite3_bind_int(statement, 2, atoi(tag_index));
-
-    char *value_index = tag_value_index_from_path(path);
-    assert(value_index != NULL);
-    sqlite3_bind_int(statement, 3, atoi(value_index));
+    statement_bind_text(statement, 1, event_id_from_path(path));
+    statement_bind_number(statement, 2, tag_index_from_path(path));
+    statement_bind_number(statement, 3, tag_value_index_from_path(path));
 
     return get_file_data(statement, ret_file_data);
 }
 
 int get_event_content_data(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_content_query.statement;
-    db_bind_id_query(statement, event_id_from_path(path));
+    statement_bind_id(statement, path);
     return get_file_data(statement, ret_file_data);
 }
 
 int get_event_kind_data(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_event_kind_query.statement;
-    db_bind_id_query(statement, event_id_from_path(path));
+    statement_bind_id(statement, path);
     return get_file_data(statement, ret_file_data);
 }
 
 int get_event_pubkey_data(Path path, char **ret_file_data) {
     sqlite3_stmt *statement = get_event_pubkey_query.statement;
-    db_bind_id_query(statement, event_id_from_path(path));
+    statement_bind_id(statement, path);
     return get_file_data(statement, ret_file_data);
 }
 
@@ -229,7 +236,8 @@ static int get_file_data(sqlite3_stmt *statement, char **ret_file_data) {
         fprintf(stderr, "Error opening event file: %s", sqlite3_errmsg(db));
         readstatus = EINVAL;
     }
-    assert(sqlite3_reset(statement) == SQLITE_OK);
+    const bool reset_successful = sqlite3_reset(statement) == SQLITE_OK;
+    assert(reset_successful);
     return readstatus;
 }
 

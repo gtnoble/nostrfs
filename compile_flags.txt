@@ -1,0 +1,9 @@
+-fsanitize=address 
+-fsanitize=leak 
+-fsanitize=undefined 
+-Wall 
+-Wextra 
+-Wpedantic 
+-Werror 
+-g
+-D_FILE_OFFSET_BITS=64

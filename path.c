@@ -10,14 +10,6 @@
 
 static const size_t k_initial_num_path_components = 20;
 
-static const char *k_events_dir_name = "e";
-static const char *k_pubkeys_dir_name = "p";
-
-static const char *k_tags_filename = "tags";
-static const char *k_content_filename = "content";
-static const char *k_kind_filename = "kind";
-static const char *k_pubkey_filename = "pubkey";
-
 bool is_valid_path(Path path);
 
 Path *parse_path(const char *raw_path) {
@@ -73,8 +65,8 @@ void free_path(Path *path) {
     free(path);
 }
 
-bool path_exists(Path path) {
-    return path.num_components >= 0;
+bool is_root_path(Path path) {
+    return path.num_components == 0;
 }
 
 bool is_valid_path(Path path) {
@@ -105,126 +97,4 @@ char *path_filename(Path path) {
     assert(is_valid_path(path));
     assert(path.num_components > 0);
     return path.path_components[path.num_components - 1];
-}
-
-
-bool is_root_dir(Path path) {
-    assert(is_valid_path(path));
-    return path_exists(path) && path.num_components == 0;
-}
-
-bool is_events_dir(Path path) {
-    assert(is_valid_path(path));
-    return 
-        path_exists(path) && 
-        is_root_dir(dirpath(path)) && 
-        strcmp(path_filename(path), k_events_dir_name) == 0;
-}
-
-bool is_event_dir(Path path) {
-    assert(is_valid_path(path));
-    return path_exists(path) && is_events_dir(dirpath(path));
-}
-
-bool is_pubkeys_dir(Path path) {
-    assert(is_valid_path(path));
-    return 
-        path_exists(path) && 
-        is_root_dir(dirpath(path)) && 
-        strcmp(path_filename(path), k_pubkeys_dir_name) == 0;
-}
-
-static bool is_in_event_dir(Path path) {
-    assert(is_valid_path(path));
-    return path_exists(path) && is_event_dir(dirpath(path));
-}
-
-bool is_content_file(Path path) {
-    assert(is_valid_path(path));
-    return 
-        is_in_event_dir(path) && 
-        strcmp(path_filename(path), k_content_filename) == 0;
-}
-
-bool is_kind_file(Path path) {
-    assert(is_valid_path(path));
-    return 
-        is_in_event_dir(path) && 
-        strcmp(path_filename(path), k_kind_filename) == 0;
-}
-
-bool is_pubkey_file(Path path) {
-    assert(is_valid_path(path));
-    return 
-        is_in_event_dir(path) && 
-        strcmp(path_filename(path), k_pubkey_filename) == 0;
-}
-
-bool is_tags_dir(Path path) {
-    assert(is_valid_path(path));
-    return 
-        path_exists(path) && 
-        is_in_event_dir(path) && 
-        strcmp(path_filename(path), k_tags_filename) == 0;
-}
-
-bool is_tag_key_dir(Path path) {
-    assert(is_valid_path(path));
-    return path_exists(path) && is_tags_dir(dirpath(path));
-}
-
-bool is_tag_dir(Path path) {
-    assert(is_valid_path(path));
-    return path_exists(path) && is_tag_key_dir(dirpath(path));
-}
-
-bool is_tag_value_file(Path path) {
-    assert(is_valid_path(path));
-    return path_exists(path) && is_tag_dir(dirpath(path));
-}
-
-static char *locate_value_in_path(Path path, bool (*path_check)(Path)) {
-    if (! path_exists(path)) {
-        return NULL;
-    }
-    else if (path_check(path)) {
-        return path_filename(path);
-    }
-    else {
-        return locate_value_in_path(parent_dir(path, 1), path_check);
-    }
-}
-
-char *event_id_from_path(Path path) {
-    return locate_value_in_path(path, is_event_dir);
-}
-
-char *tag_key_from_path(Path path) {
-    return locate_value_in_path(path, is_tag_key_dir);
-}
-
-char *tag_index_from_path(Path path) {
-    return locate_value_in_path(path, is_tag_dir);
-}
-
-char *tag_value_index_from_path(Path path) {
-    return locate_value_in_path(path, is_tag_value_file);
-}
-
-int fill_event_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
-    (void) path;
-
-    filler(buffer, k_content_filename, NULL, 0);
-    filler(buffer, k_kind_filename, NULL, 0);
-    filler(buffer, k_pubkey_filename, NULL, 0);
-    filler(buffer, k_tags_filename, NULL, 0);
-    return 0;
-}
-
-int fill_root_dir(Path path, void *buffer, fuse_fill_dir_t filler) {
-    (void) path;
-
-    filler(buffer, k_events_dir_name, NULL, 0);
-    filler(buffer, k_pubkeys_dir_name, NULL, 0);
-    return 0;
 }

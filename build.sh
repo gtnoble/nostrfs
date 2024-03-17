@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc db.c path.c nostrFs.c -fsanitize=address -fsanitize=leak -fsanitize=undefined -Wall -Wextra -Wpedantic -Werror -g -o nostrfs `pkg-config fuse --cflags --libs` -lsqlite3
+gcc db.c path.c nostrFs.c synthetic_file.c -O0 -fsanitize=address -fsanitize=leak -fsanitize=undefined -Wall -Wextra -Wpedantic -Werror -D_FILE_OFFSET_BITS=64 -g -o nostrfs `pkg-config fuse --cflags --libs` -lsqlite3
